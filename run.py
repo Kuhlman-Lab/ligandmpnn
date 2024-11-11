@@ -24,7 +24,7 @@ from prody import writePDB
 from sc_utils import Packer, pack_side_chains
 
 
-def main(args) -> None:
+def main(args, design_run: bool = False) -> None:
     """
     Inference function
     """
@@ -40,17 +40,19 @@ def main(args) -> None:
     base_folder = folder_for_outputs
     if base_folder[-1] != "/":
         base_folder = base_folder + "/"
-    if not os.path.exists(base_folder):
-        os.makedirs(base_folder, exist_ok=True)
-    if not os.path.exists(base_folder + "seqs"):
-        os.makedirs(base_folder + "seqs", exist_ok=True)
-    if not os.path.exists(base_folder + "backbones"):
-        os.makedirs(base_folder + "backbones", exist_ok=True)
-    if not os.path.exists(base_folder + "packed"):
-        os.makedirs(base_folder + "packed", exist_ok=True)
-    if args.save_stats:
-        if not os.path.exists(base_folder + "stats"):
-            os.makedirs(base_folder + "stats", exist_ok=True)
+    if not design_run:
+        # Disable outputs if design_run
+        if not os.path.exists(base_folder):
+            os.makedirs(base_folder, exist_ok=True)
+        if not os.path.exists(base_folder + "seqs"):
+            os.makedirs(base_folder + "seqs", exist_ok=True)
+        if not os.path.exists(base_folder + "backbones"):
+            os.makedirs(base_folder + "backbones", exist_ok=True)
+        if not os.path.exists(base_folder + "packed"):
+            os.makedirs(base_folder + "packed", exist_ok=True)
+        if args.save_stats:
+            if not os.path.exists(base_folder + "stats"):
+                os.makedirs(base_folder + "stats", exist_ok=True)
     if args.model_type == "protein_mpnn":
         checkpoint_path = args.checkpoint_protein_mpnn
     elif args.model_type == "ligand_mpnn":
@@ -181,6 +183,7 @@ def main(args) -> None:
     )
 
     # loop over PDB paths
+    full_output_dict = {}
     for pdb in pdb_paths:
         if args.verbose:
             print("Designing protein from this path:", pdb)
@@ -476,7 +479,9 @@ def main(args) -> None:
             out_dict["chain_mask"] = feature_dict["chain_mask"][0].cpu()
             out_dict["seed"] = seed
             out_dict["temperature"] = args.temperature
-            if args.save_stats:
+            full_output_dict[pdb] = out_dict
+            if args.save_stats and not design_run:
+                # Disable outputs if design_run
                 torch.save(out_dict, output_stats_path)
 
             if args.pack_side_chains:
@@ -533,136 +538,140 @@ def main(args) -> None:
                     X_m_stack_list.append(X_m_stack)
                     b_factor_stack_list.append(b_factor_stack)
 
-            with open(output_fasta, "w") as f:
-                f.write(
-                    ">{}, T={}, seed={}, num_res={}, num_ligand_res={}, use_ligand_context={}, ligand_cutoff_distance={}, batch_size={}, number_of_batches={}, model_path={}\n{}\n".format(
-                        name,
-                        args.temperature,
-                        seed,
-                        torch.sum(rec_mask).cpu().numpy(),
-                        torch.sum(combined_mask[:1]).cpu().numpy(),
-                        bool(args.ligand_mpnn_use_atom_context),
-                        float(args.ligand_mpnn_cutoff_for_score),
-                        args.batch_size,
-                        args.number_of_batches,
-                        checkpoint_path,
-                        seq_out_str,
-                    )
-                )
-                for ix in range(S_stack.shape[0]):
-                    ix_suffix = ix
-                    if not args.zero_indexed:
-                        ix_suffix += 1
-                    seq_rec_print = np.format_float_positional(
-                        rec_stack[ix].cpu().numpy(), unique=False, precision=4
-                    )
-                    loss_np = np.format_float_positional(
-                        np.exp(-loss_stack[ix].cpu().numpy()), unique=False, precision=4
-                    )
-                    loss_XY_np = np.format_float_positional(
-                        np.exp(-loss_XY_stack[ix].cpu().numpy()),
-                        unique=False,
-                        precision=4,
-                    )
-                    seq = "".join(
-                        [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
-                    )
-
-                    # write new sequences into PDB with backbone coordinates
-                    seq_prody = np.array([restype_1to3[AA] for AA in list(seq)])[
-                        None,
-                    ].repeat(4, 1)
-                    bfactor_prody = (
-                        loss_per_residue_stack[ix].cpu().numpy()[None, :].repeat(4, 1)
-                    )
-                    backbone.setResnames(seq_prody)
-                    backbone.setBetas(
-                        np.exp(-bfactor_prody)
-                        * (bfactor_prody > 0.01).astype(np.float32)
-                    )
-                    if other_atoms:
-                        writePDB(
-                            output_backbones
-                            + name
-                            + "_"
-                            + str(ix_suffix)
-                            + args.file_ending
-                            + ".pdb",
-                            backbone + other_atoms,
+            if not design_run:
+                # Disable outputs if design_run
+                with open(output_fasta, "w") as f:
+                    f.write(
+                        ">{}, T={}, seed={}, num_res={}, num_ligand_res={}, use_ligand_context={}, ligand_cutoff_distance={}, batch_size={}, number_of_batches={}, model_path={}\n{}\n".format(
+                            name,
+                            args.temperature,
+                            seed,
+                            torch.sum(rec_mask).cpu().numpy(),
+                            torch.sum(combined_mask[:1]).cpu().numpy(),
+                            bool(args.ligand_mpnn_use_atom_context),
+                            float(args.ligand_mpnn_cutoff_for_score),
+                            args.batch_size,
+                            args.number_of_batches,
+                            checkpoint_path,
+                            seq_out_str,
                         )
-                    else:
-                        writePDB(
-                            output_backbones
-                            + name
-                            + "_"
-                            + str(ix_suffix)
-                            + args.file_ending
-                            + ".pdb",
-                            backbone,
+                    )
+                    for ix in range(S_stack.shape[0]):
+                        ix_suffix = ix
+                        if not args.zero_indexed:
+                            ix_suffix += 1
+                        seq_rec_print = np.format_float_positional(
+                            rec_stack[ix].cpu().numpy(), unique=False, precision=4
+                        )
+                        loss_np = np.format_float_positional(
+                            np.exp(-loss_stack[ix].cpu().numpy()), unique=False, precision=4
+                        )
+                        loss_XY_np = np.format_float_positional(
+                            np.exp(-loss_XY_stack[ix].cpu().numpy()),
+                            unique=False,
+                            precision=4,
+                        )
+                        seq = "".join(
+                            [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
                         )
 
-                    # write full PDB files
-                    if args.pack_side_chains:
-                        for c_pack in range(args.number_of_packs_per_design):
-                            X_stack = X_stack_list[c_pack]
-                            X_m_stack = X_m_stack_list[c_pack]
-                            b_factor_stack = b_factor_stack_list[c_pack]
-                            write_full_PDB(
-                                output_packed
+                        # write new sequences into PDB with backbone coordinates
+                        seq_prody = np.array([restype_1to3[AA] for AA in list(seq)])[
+                            None,
+                        ].repeat(4, 1)
+                        bfactor_prody = (
+                            loss_per_residue_stack[ix].cpu().numpy()[None, :].repeat(4, 1)
+                        )
+                        backbone.setResnames(seq_prody)
+                        backbone.setBetas(
+                            np.exp(-bfactor_prody)
+                            * (bfactor_prody > 0.01).astype(np.float32)
+                        )
+                        if other_atoms:
+                            writePDB(
+                                output_backbones
                                 + name
-                                + args.packed_suffix
                                 + "_"
                                 + str(ix_suffix)
-                                + "_"
-                                + str(c_pack + 1)
                                 + args.file_ending
                                 + ".pdb",
-                                X_stack[ix].cpu().numpy(),
-                                X_m_stack[ix].cpu().numpy(),
-                                b_factor_stack[ix].cpu().numpy(),
-                                feature_dict["R_idx_original"][0].cpu().numpy(),
-                                protein_dict["chain_letters"],
-                                S_stack[ix].cpu().numpy(),
-                                other_atoms=other_atoms,
-                                icodes=icodes,
-                                force_hetatm=args.force_hetatm,
+                                backbone + other_atoms,
                             )
-                    # -----
+                        else:
+                            writePDB(
+                                output_backbones
+                                + name
+                                + "_"
+                                + str(ix_suffix)
+                                + args.file_ending
+                                + ".pdb",
+                                backbone,
+                            )
 
-                    # write fasta lines
-                    seq_np = np.array(list(seq))
-                    seq_out_str = []
-                    for mask in protein_dict["mask_c"]:
-                        seq_out_str += list(seq_np[mask.cpu().numpy()])
-                        seq_out_str += [args.fasta_seq_separation]
-                    seq_out_str = "".join(seq_out_str)[:-1]
-                    if ix == S_stack.shape[0] - 1:
-                        # final 2 lines
-                        f.write(
-                            ">{}, id={}, T={}, seed={}, overall_confidence={}, ligand_confidence={}, seq_rec={}\n{}".format(
-                                name,
-                                ix_suffix,
-                                args.temperature,
-                                seed,
-                                loss_np,
-                                loss_XY_np,
-                                seq_rec_print,
-                                seq_out_str,
+                        # write full PDB files
+                        if args.pack_side_chains:
+                            for c_pack in range(args.number_of_packs_per_design):
+                                X_stack = X_stack_list[c_pack]
+                                X_m_stack = X_m_stack_list[c_pack]
+                                b_factor_stack = b_factor_stack_list[c_pack]
+                                write_full_PDB(
+                                    output_packed
+                                    + name
+                                    + args.packed_suffix
+                                    + "_"
+                                    + str(ix_suffix)
+                                    + "_"
+                                    + str(c_pack + 1)
+                                    + args.file_ending
+                                    + ".pdb",
+                                    X_stack[ix].cpu().numpy(),
+                                    X_m_stack[ix].cpu().numpy(),
+                                    b_factor_stack[ix].cpu().numpy(),
+                                    feature_dict["R_idx_original"][0].cpu().numpy(),
+                                    protein_dict["chain_letters"],
+                                    S_stack[ix].cpu().numpy(),
+                                    other_atoms=other_atoms,
+                                    icodes=icodes,
+                                    force_hetatm=args.force_hetatm,
+                                )
+                        # -----
+
+                        # write fasta lines
+                        seq_np = np.array(list(seq))
+                        seq_out_str = []
+                        for mask in protein_dict["mask_c"]:
+                            seq_out_str += list(seq_np[mask.cpu().numpy()])
+                            seq_out_str += [args.fasta_seq_separation]
+                        seq_out_str = "".join(seq_out_str)[:-1]
+                        if ix == S_stack.shape[0] - 1:
+                            # final 2 lines
+                            f.write(
+                                ">{}, id={}, T={}, seed={}, overall_confidence={}, ligand_confidence={}, seq_rec={}\n{}".format(
+                                    name,
+                                    ix_suffix,
+                                    args.temperature,
+                                    seed,
+                                    loss_np,
+                                    loss_XY_np,
+                                    seq_rec_print,
+                                    seq_out_str,
+                                )
                             )
-                        )
-                    else:
-                        f.write(
-                            ">{}, id={}, T={}, seed={}, overall_confidence={}, ligand_confidence={}, seq_rec={}\n{}\n".format(
-                                name,
-                                ix_suffix,
-                                args.temperature,
-                                seed,
-                                loss_np,
-                                loss_XY_np,
-                                seq_rec_print,
-                                seq_out_str,
+                        else:
+                            f.write(
+                                ">{}, id={}, T={}, seed={}, overall_confidence={}, ligand_confidence={}, seq_rec={}\n{}\n".format(
+                                    name,
+                                    ix_suffix,
+                                    args.temperature,
+                                    seed,
+                                    loss_np,
+                                    loss_XY_np,
+                                    seq_rec_print,
+                                    seq_out_str,
+                                )
                             )
-                        )
+    
+    return full_output_dict
 
 
 if __name__ == "__main__":
@@ -673,10 +682,10 @@ if __name__ == "__main__":
     argparser.add_argument(
         "--model_type",
         type=str,
-        default="protein_mpnn",
+        default="ligand_mpnn",
         help="Choose your model: protein_mpnn, ligand_mpnn, per_residue_label_membrane_mpnn, global_label_membrane_mpnn, soluble_mpnn",
     )
-    # protein_mpnn - original ProteinMPNN trained on the whole PDB exluding non-protein atoms
+    # protein_mpnn - original ProteinMPNN trained on the whole PDB excluding non-protein atoms
     # ligand_mpnn - atomic context aware model trained with small molecules, nucleotides, metals etc on the whole PDB
     # per_residue_label_membrane_mpnn - ProteinMPNN model trained with addition label per residue specifying if that residue is buried or exposed
     # global_label_membrane_mpnn - ProteinMPNN model trained with global label per PDB id to specify if protein is transmembrane
