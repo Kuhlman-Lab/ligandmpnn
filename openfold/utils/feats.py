@@ -251,7 +251,7 @@ def frames_and_literature_positions_to_atom14_pos(
 
     # [*, N, 14, 8]
     group_mask = nn.functional.one_hot(
-        group_mask,
+        group_mask.long(),
         num_classes=default_frames.shape[-3],
     )
 

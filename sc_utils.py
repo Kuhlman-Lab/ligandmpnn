@@ -132,7 +132,7 @@ def pack_side_chains(
     tmp_types = torch.tensor(restype_atom14_to_rigid_group, device=device)[S_af2]
     tmp_types[tmp_types < 4] = 4
     tmp_types -= 4
-    atom_types_for_b_factor = torch.nn.functional.one_hot(tmp_types, 4)  # [B, L, 14, 4]
+    atom_types_for_b_factor = torch.nn.functional.one_hot(tmp_types.long(), 4)  # [B, L, 14, 4]
 
     uncertainty = log_prob[:, :, None, :] * atom_types_for_b_factor  # [B,L,14,4]
     b_factor_pred = uncertainty.sum(-1)  # [B, L, 14]
