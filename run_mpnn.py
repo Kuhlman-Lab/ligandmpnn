@@ -483,7 +483,7 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
             out_dict["temperature"] = conf.inference.temperature
             full_output_dict[pdb] = out_dict
 
-            if conf.inference.save_stats and not design_run::
+            if conf.inference.save_stats and not design_run:
                 torch.save(out_dict, output_stats_path)
 
             if conf.inference.pack_side_chains:
