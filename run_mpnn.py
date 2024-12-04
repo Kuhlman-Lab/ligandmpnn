@@ -1,11 +1,11 @@
-import argparse
 import copy
 import json
 import os.path
 import random
 import sys
-import hydra
-from hydra.core.hydra_config import HydraConfig
+import argparse
+import omegaconf
+# from hydra.core.hydra_config import HydraConfig
 
 import numpy as np
 import torch
@@ -25,11 +25,12 @@ from model_utils import ProteinMPNN
 from prody import writePDB
 from sc_utils import Packer, pack_side_chains
 
-@hydra.main(version_base=None, config_path='configs/', config_name='mpnn_basic')
-def main(conf: HydraConfig, design_run: bool = False) -> None:
+#@hydra.main(version_base=None, config_path='configs/', config_name='mpnn_basic')
+def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
     """
     Inference function
     """
+    
     if conf.inference.seed:
         seed = conf.inference.seed
     else:
@@ -120,30 +121,87 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
         model_sc.load_state_dict(checkpoint_sc["model_state_dict"])
         model_sc.to(device)
         model_sc.eval()
+    
+    if not pdb_paths:
+        if conf.inference.pdb_path_multi:
+            with open(conf.inference.pdb_path_multi, "r") as fh:
+                pdb_paths = list(json.load(fh))
+        elif conf.inference.pdb_path:
+            pdb_paths = [conf.inference.pdb_path]
+    
+    if not json_data:
+        if conf.inference.json_file:
+            with open(conf.inference.json_file, "r") as fh:
+                json_data = json.load(fh)
+                
+    fixed_residues_multi = {}
+    redesigned_residues_multi = {}
+    omit_AA_per_residue_multi = {}
 
-    if conf.inference.pdb_path_multi:
-        with open(conf.inference.pdb_path_multi, "r") as fh:
-            pdb_paths = list(json.load(fh))
+    fixed_residues = None
+    redesigned_residues = None
+    
+    if conf.inference.omit_AA:
+        omit_AA_list = conf.inference.omit_AA
     else:
-        pdb_paths = [conf.inference.pdb_path]
+        omit_AA_list = []
+    omit_AA = torch.tensor(np.array([AA in omit_AA_list for AA in alphabet]).astype(np.float32), device=device)
 
-    if conf.inference.fixed_residues_multi:
-        with open(conf.inference.fixed_residues_multi, "r") as fh:
-            fixed_residues_multi = json.load(fh)
-    else:
-        fixed_residues = [item for item in conf.inference.fixed_residues.split()]
-        fixed_residues_multi = {}
-        for pdb in pdb_paths:
-            fixed_residues_multi[pdb] = fixed_residues
-
-    if conf.inference.redesigned_residues_multi:
-        with open(conf.inference.redesigned_residues_multi, "r") as fh:
-            redesigned_residues_multi = json.load(fh)
-    else:
-        redesigned_residues = [item for item in conf.inference.redesigned_residues.split()]
-        redesigned_residues_multi = {}
+    if json_data:
+        #get redesigned residues from json
+        redesigned_residues = []
+        symmetry_residues_list_of_lists = []
+        symmetry_weights = []
+        
+        omit_AA_per_residue = {}
+        for d in json_data["designable"]:
+            redesigned_residues.append(d["chain"] + str(d["resid"]))
+            mut_to = list(d["MutTo"])
+            omit = [x for x in alphabet if x not in mut_to]
+            omit_AA_per_residue[d["chain"] + str(d["resid"])] = omit
+            
         for pdb in pdb_paths:
             redesigned_residues_multi[pdb] = redesigned_residues
+            omit_AA_per_residue_multi[pdb] = omit_AA_per_residue
+            
+        for sym in json_data["symmetric"]:
+            symmetry_residues_list_of_lists.append(sym)
+            symmetry_weights.append([1.0 for x in sym])
+        if len(symmetry_residues_list_of_lists) == 0:
+            symmetry_residues_list_of_lists = [[]]
+            symmetry_weights = [[]]
+            
+    else:
+
+        if conf.inference.fixed_residues_multi:
+            with open(conf.inference.fixed_residues_multi, "r") as fh:
+                fixed_residues_multi = json.load(fh)
+        elif conf.inference.fixed_residues:
+            fixed_residues = [item for item in conf.inference.fixed_residues.split()]
+            for pdb in pdb_paths:
+                fixed_residues_multi[pdb] = fixed_residues
+
+        if conf.inference.redesigned_residues_multi:
+            with open(conf.inference.redesigned_residues_multi, "r") as fh:
+                redesigned_residues_multi = json.load(fh)
+        elif conf.inference.redesigned_residues:
+            redesigned_residues = [item for item in conf.inference.redesigned_residues.split()]
+            for pdb in pdb_paths:
+                redesigned_residues_multi[pdb] = redesigned_residues
+
+        if conf.inference.omit_AA_per_residue_multi:
+            with open(conf.inference.omit_AA_per_residue_multi, "r") as fh:
+                omit_AA_per_residue_multi = json.load(
+                    fh
+                )  # {"pdb_path" : {"A12": "PQR", "A13": "QS"}}
+        else:
+            if conf.inference.omit_AA_per_residue:
+                with open(conf.inference.omit_AA_per_residue, "r") as fh:
+                    omit_AA_per_residue = json.load(fh)  # {"A12": "PG"}
+            else:
+                omit_AA_per_residue = {}
+            for pdb in pdb_paths:
+                omit_AA_per_residue_multi[pdb] = omit_AA_per_residue
 
     bias_AA = torch.zeros([21], device=device, dtype=torch.float32)
     if conf.inference.bias_AA:
@@ -165,32 +223,20 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
             bias_AA_per_residue_multi = {}
             for pdb in pdb_paths:
                 bias_AA_per_residue_multi[pdb] = bias_AA_per_residue
-
-    if conf.inference.omit_AA_per_residue_multi:
-        with open(conf.inference.omit_AA_per_residue_multi, "r") as fh:
-            omit_AA_per_residue_multi = json.load(
-                fh
-            )  # {"pdb_path" : {"A12": "PQR", "A13": "QS"}}
-    else:
-        if conf.inference.omit_AA_per_residue:
-            with open(conf.inference.omit_AA_per_residue, "r") as fh:
-                omit_AA_per_residue = json.load(fh)  # {"A12": "PG"}
-            omit_AA_per_residue_multi = {}
-            for pdb in pdb_paths:
-                omit_AA_per_residue_multi[pdb] = omit_AA_per_residue
-    omit_AA_list = conf.inference.omit_AA
-    omit_AA = torch.tensor(
-        np.array([AA in omit_AA_list for AA in alphabet]).astype(np.float32),
-        device=device,
-    )
-
+                    
     # loop over PDB paths
     full_output_dict = {}
     for pdb in pdb_paths:
         if conf.inference.verbose:
             print("Designing protein from this path:", pdb)
-        fixed_residues = fixed_residues_multi[pdb]
-        redesigned_residues = redesigned_residues_multi[pdb]
+        if pdb in fixed_residues_multi:
+            fixed_residues = fixed_residues_multi[pdb]
+        else:
+            fixed_residues = []
+        if pdb in redesigned_residues_multi:
+            redesigned_residues = redesigned_residues_multi[pdb]
+        else:
+            redesigned_residues = []
         parse_all_atoms_flag = conf.inference.ligand_mpnn_use_side_chain_context or (
             conf.inference.pack_side_chains and not conf.inference.repack_everything
         )
@@ -226,19 +272,69 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
                             j1 = restype_str_to_int[amino_acid]
                             bias_AA_per_residue[i1, j1] = v2
 
+
         omit_AA_per_residue = torch.zeros(
             [len(encoded_residues), 21], device=device, dtype=torch.float32
         )
-        if conf.inference.omit_AA_per_residue_multi or conf.inference.omit_AA_per_residue:
-            omit_dict = omit_AA_per_residue_multi[pdb]
-            for residue_name, v1 in omit_dict.items():
-                if residue_name in encoded_residues:
-                    i1 = encoded_residue_dict[residue_name]
-                    for amino_acid in v1:
-                        if amino_acid in alphabet:
-                            j1 = restype_str_to_int[amino_acid]
-                            omit_AA_per_residue[i1, j1] = 1.0
+        
+        omit_dict = omit_AA_per_residue_multi[pdb]
+        for residue_name, v1 in omit_dict.items():
+            if residue_name in encoded_residues:
+                i1 = encoded_residue_dict[residue_name]
+                for amino_acid in v1:
+                    if amino_acid in alphabet:
+                        j1 = restype_str_to_int[amino_acid]
+                        omit_AA_per_residue[i1, j1] = 1.0
 
+        if not json_data:
+
+            # specify which residues are linked
+            if conf.inference.symmetry_residues:
+                symmetry_residues_list_of_lists = [
+                    x.split(",") for x in conf.inference.symmetry_residues.split("|")
+                ]
+            else:
+                remapped_symmetry_residues = [[]]
+
+            # specify linking weights
+            if conf.inference.symmetry_weights:
+                symmetry_weights = [
+                    [float(item) for item in x.split(",")]
+                    for x in conf.inference.symmetry_weights.split("|")
+                ]
+            else:
+                symmetry_weights = [[]]
+
+            if conf.inference.homo_oligomer:
+                if conf.inference.verbose:
+                    print("Designing HOMO-OLIGOMER")
+                chain_letters_set = list(set(chain_letters_list))
+                reference_chain = chain_letters_set[0]
+                lc = len(reference_chain)
+                residue_indices = [
+                    item[lc:] for item in encoded_residues if item[:lc] == reference_chain
+                ]
+                remapped_symmetry_residues = []
+                symmetry_weights = []
+                for res in residue_indices:
+                    tmp_list = []
+                    tmp_w_list = []
+                    for chain in chain_letters_set:
+                        name = chain + res
+                        tmp_list.append(encoded_residue_dict[name])
+                        tmp_w_list.append(1 / len(chain_letters_set))
+                    remapped_symmetry_residues.append(tmp_list)
+                    symmetry_weights.append(tmp_w_list)
+        else:
+            pass
+        
+        remapped_symmetry_residues = []
+        for t_list in symmetry_residues_list_of_lists:
+            tmp_list = []
+            for t in t_list:
+                tmp_list.append(encoded_residue_dict[t])
+            remapped_symmetry_residues.append(tmp_list)
+    
         fixed_positions = torch.tensor(
             [int(item not in fixed_residues) for item in encoded_residues],
             device=device,
@@ -311,49 +407,6 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
             print("These residues will be redesigned: ", PDB_residues_to_be_redesigned)
             print("These residues will be fixed: ", PDB_residues_to_be_fixed)
 
-        # specify which residues are linked
-        if conf.inference.symmetry_residues:
-            symmetry_residues_list_of_lists = [
-                x.split(",") for x in conf.inference.symmetry_residues.split("|")
-            ]
-            remapped_symmetry_residues = []
-            for t_list in symmetry_residues_list_of_lists:
-                tmp_list = []
-                for t in t_list:
-                    tmp_list.append(encoded_residue_dict[t])
-                remapped_symmetry_residues.append(tmp_list)
-        else:
-            remapped_symmetry_residues = [[]]
-
-        # specify linking weights
-        if conf.inference.symmetry_weights:
-            symmetry_weights = [
-                [float(item) for item in x.split(",")]
-                for x in conf.inference.symmetry_weights.split("|")
-            ]
-        else:
-            symmetry_weights = [[]]
-
-        if conf.inference.homo_oligomer:
-            if conf.inference.verbose:
-                print("Designing HOMO-OLIGOMER")
-            chain_letters_set = list(set(chain_letters_list))
-            reference_chain = chain_letters_set[0]
-            lc = len(reference_chain)
-            residue_indices = [
-                item[lc:] for item in encoded_residues if item[:lc] == reference_chain
-            ]
-            remapped_symmetry_residues = []
-            symmetry_weights = []
-            for res in residue_indices:
-                tmp_list = []
-                tmp_w_list = []
-                for chain in chain_letters_set:
-                    name = chain + res
-                    tmp_list.append(encoded_residue_dict[name])
-                    tmp_w_list.append(1 / len(chain_letters_set))
-                remapped_symmetry_residues.append(tmp_list)
-                symmetry_weights.append(tmp_w_list)
 
         # set other atom bfactors to 0.0
         if other_atoms:
@@ -466,6 +519,8 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
                 seq_out_str += [conf.inference.fasta_seq_separation]
             seq_out_str = "".join(seq_out_str)[:-1]
 
+            if not conf.inference.file_ending:
+                conf.inference.file_ending = ""
             output_fasta = base_folder + "/seqs/" + name + conf.inference.file_ending + ".fa"
             output_backbones = base_folder + "/backbones/"
             output_packed = base_folder + "/packed/"
@@ -539,7 +594,39 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
                     X_stack_list.append(X_stack)
                     X_m_stack_list.append(X_m_stack)
                     b_factor_stack_list.append(b_factor_stack)
+            
+            for ix in range(S_stack.shape[0]):
+                ix_suffix = ix
+                if not conf.inference.zero_indexed:
+                    ix_suffix += 1
+                seq_rec_print = np.format_float_positional(
+                    rec_stack[ix].cpu().numpy(), unique=False, precision=4
+                )
+                loss_np = np.format_float_positional(
+                    np.exp(-loss_stack[ix].cpu().numpy()), unique=False, precision=4
+                )
+                loss_XY_np = np.format_float_positional(
+                    np.exp(-loss_XY_stack[ix].cpu().numpy()),
+                    unique=False,
+                    precision=4,
+                )
+                seq = "".join(
+                    [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
+                )
 
+                # write new sequences into PDB with backbone coordinates
+                seq_prody = np.array([restype_1to3[AA] for AA in list(seq)])[
+                    None,
+                ].repeat(4, 1)
+                bfactor_prody = (
+                    loss_per_residue_stack[ix].cpu().numpy()[None, :].repeat(4, 1)
+                )
+                backbone.setResnames(seq_prody)
+                backbone.setBetas(
+                    np.exp(-bfactor_prody)
+                    * (bfactor_prody > 0.01).astype(np.float32)
+                )
+                
             if not design_run:
                 # Disable outputs if design_run
                 with open(output_fasta, "w") as f:
@@ -559,36 +646,6 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
                         )
                     )
                     for ix in range(S_stack.shape[0]):
-                        ix_suffix = ix
-                        if not conf.inference.zero_indexed:
-                            ix_suffix += 1
-                        seq_rec_print = np.format_float_positional(
-                            rec_stack[ix].cpu().numpy(), unique=False, precision=4
-                        )
-                        loss_np = np.format_float_positional(
-                            np.exp(-loss_stack[ix].cpu().numpy()), unique=False, precision=4
-                        )
-                        loss_XY_np = np.format_float_positional(
-                            np.exp(-loss_XY_stack[ix].cpu().numpy()),
-                            unique=False,
-                            precision=4,
-                        )
-                        seq = "".join(
-                            [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
-                        )
-
-                        # write new sequences into PDB with backbone coordinates
-                        seq_prody = np.array([restype_1to3[AA] for AA in list(seq)])[
-                            None,
-                        ].repeat(4, 1)
-                        bfactor_prody = (
-                            loss_per_residue_stack[ix].cpu().numpy()[None, :].repeat(4, 1)
-                        )
-                        backbone.setResnames(seq_prody)
-                        backbone.setBetas(
-                            np.exp(-bfactor_prody)
-                            * (bfactor_prody > 0.01).astype(np.float32)
-                        )
                         if other_atoms:
                             writePDB(
                                 output_backbones
@@ -672,6 +729,41 @@ def main(conf: HydraConfig, design_run: bool = False) -> None:
                                     seq_out_str,
                                 )
                             )
+            else:
+                seq_np = np.array(list(seq))
+                seq_out_str = []
+                for mask in protein_dict["mask_c"]:
+                    seq_out_str += list(seq_np[mask.cpu().numpy()])
+                    seq_out_str += [conf.inference.fasta_seq_separation]
+                seq_out_str = "".join(seq_out_str)[:-1]
+                return seq_out_str
                         
 if __name__ == "__main__":
-    main()
+    argparser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    argparser.add_argument(
+        "--config_file",
+        type=str,
+        default="./mpnn_basic.yaml",
+        help="path to yaml config file to load options",
+    )
+    argparser.add_argument(
+        "--json_file",
+        type=str,
+        default=None,
+        help="path to json file to load design specs. overwrites config file json file",
+    )
+    argparser.add_argument(
+        "--pdb_path",
+        type=str,
+        default=None,
+        help="path to pdb file to load backbone for design. overwrites config file pdb path",
+    )
+    args = argparser.parse_args()
+    
+    # Load config
+    conf = omegaconf.OmegaConf.load(args.config_file)
+    main(conf, design_run=False, json_data=args.json_file, pdb_paths=args.pdb_path)
+    # print(main(conf, design_run=True, json_data=args.json_file, pdb_paths=args.pdb_path))
