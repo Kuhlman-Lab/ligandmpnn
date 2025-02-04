@@ -14,13 +14,13 @@ inference:
   
   #provide these only if no JSON file is provided above
   fixed_residues: null #Provide fixed residues, A12 A13 A14 B2 B25
-  redesigned_residues: C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 #Provide to be redesigned residues, everything else will be fixed, A12 A13 A14 B2 B25
+  redesigned_residues: A57 A58 A59 A60 B57 B58 B59 B60 C57 C58 C59 C60 #Provide to be redesigned residues, everything else will be fixed, A12 A13 A14 B2 B25
   pdb_path_multi: null #Path to json listing PDB paths. {'/path/to/pdb': ''} - only keys will be used.
   fixed_residues_multi: null #Path to json mapping of fixed residues for each pdb i.e., {'/path/to/pdb': 'A12 A13 A14 B2 B25'}
   redesigned_residues_multi: null #Path to json mapping of redesigned residues for each pdb i.e., {'/path/to/pdb': 'A12 A13 A14 B2 B25'}
   chains_to_design: null #Specify which chains to redesign, all others will be kept fixed
   homo_oligomer: 0 #Setting this to 1 will automatically set --symmetry_residues and --symmetry_weights to do homooligomer design with equal weighting.
-  symmetry_residues: null #Add list of lists for which residues need to be symmetric, e.g. 'A12,A13,A14|C2,C3|A5,B6'
+  symmetry_residues: A57,B57,C57|A58,B58,C58|A59,B59,C59|A60,B60,C60 #Add list of lists for which residues need to be symmetric, e.g. 'A12,A13,A14|C2,C3|A5,B6'
   symmetry_weights: null #Add weights that match symmetry_residues, e.g. '1.01,1.0,1.0|-1.0,2.0|2.0,2.3'    
   omit_AA: null #Bias generation of amino acids, e.g. 'ACG'
   omit_AA_per_residue: null #Path to json mapping of bias {'A12': 'APQ', 'A13': 'QST'

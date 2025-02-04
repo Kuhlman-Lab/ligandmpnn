@@ -5,7 +5,6 @@ import random
 import sys
 import argparse
 import omegaconf
-# from hydra.core.hydra_config import HydraConfig
 
 import numpy as np
 import torch
@@ -417,6 +416,8 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
         name = pdb[pdb.rfind("/") + 1 :]
         if name[-4:] == ".pdb":
             name = name[:-4]
+            
+        out_seqs = []
 
         with torch.no_grad():
             # run featurize to remap R_idx and add batch dimension
@@ -472,6 +473,12 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                     [feature_dict["batch_size"], feature_dict["mask"].shape[1]],
                     device=device,
                 )
+                # print("feature_dict")
+                # for feat in feature_dict:
+                #     if type(feature_dict[feat]) == torch.Tensor:
+                #         print(feat, feature_dict[feat].shape)
+                #     else:
+                #         print(feat, feature_dict[feat])
                 output_dict = model.sample(feature_dict)
 
                 # compute confidence scores
@@ -736,7 +743,10 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                     seq_out_str += list(seq_np[mask.cpu().numpy()])
                     seq_out_str += [conf.inference.fasta_seq_separation]
                 seq_out_str = "".join(seq_out_str)[:-1]
-                return seq_out_str
+                out_seqs.append(seq_out_str)
+    
+    if design_run:
+        return out_seqs
                         
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -764,6 +774,10 @@ if __name__ == "__main__":
     args = argparser.parse_args()
     
     # Load config
+    jsondata = None
+    if args.json_file:
+        with open(args.json_file, "r") as fh:
+            jsondata = json.load(fh)
     conf = omegaconf.OmegaConf.load(args.config_file)
-    main(conf, design_run=False, json_data=args.json_file, pdb_paths=args.pdb_path)
+    print(main(conf, design_run=True, json_data=jsondata, pdb_paths=[args.pdb_path]))
     # print(main(conf, design_run=True, json_data=args.json_file, pdb_paths=args.pdb_path))
