@@ -653,6 +653,36 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                         )
                     )
                     for ix in range(S_stack.shape[0]):
+                        ix_suffix = ix
+                        if not conf.inference.zero_indexed:
+                            ix_suffix += 1
+                        seq_rec_print = np.format_float_positional(
+                            rec_stack[ix].cpu().numpy(), unique=False, precision=4
+                        )
+                        loss_np = np.format_float_positional(
+                            np.exp(-loss_stack[ix].cpu().numpy()), unique=False, precision=4
+                        )
+                        loss_XY_np = np.format_float_positional(
+                            np.exp(-loss_XY_stack[ix].cpu().numpy()),
+                            unique=False,
+                            precision=4,
+                        )
+                        seq = "".join(
+                            [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
+                        )
+
+                        # write new sequences into PDB with backbone coordinates
+                        seq_prody = np.array([restype_1to3[AA] for AA in list(seq)])[
+                            None,
+                        ].repeat(4, 1)
+                        bfactor_prody = (
+                            loss_per_residue_stack[ix].cpu().numpy()[None, :].repeat(4, 1)
+                        )
+                        backbone.setResnames(seq_prody)
+                        backbone.setBetas(
+                            np.exp(-bfactor_prody)
+                            * (bfactor_prody > 0.01).astype(np.float32)
+                        )
                         if other_atoms:
                             writePDB(
                                 output_backbones
@@ -736,10 +766,13 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                                     seq_out_str,
                                 )
                             )
-            else:
+            else:    
+                for ix in range(S_stack.shape[0]):
+                    seq = "".join(
+                        [restype_int_to_str[AA] for AA in S_stack[ix].cpu().numpy()]
+                    )
                     
-                for ix in range(S_stack.shape[0]):   
-                    # extract fasta lines
+                    # extract sequences from fasta lines
                     seq_np = np.array(list(seq))
                     seq_out_str = []
                     for mask in protein_dict["mask_c"]:
@@ -747,8 +780,7 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                         seq_out_str += [conf.inference.fasta_seq_separation]
                     seq_out_str = "".join(seq_out_str)[:-1]
                     out_seqs.append(seq_out_str)
-                            
-    
+
     if design_run:
         return out_seqs
                         
