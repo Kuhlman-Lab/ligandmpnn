@@ -737,13 +737,17 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                                 )
                             )
             else:
-                seq_np = np.array(list(seq))
-                seq_out_str = []
-                for mask in protein_dict["mask_c"]:
-                    seq_out_str += list(seq_np[mask.cpu().numpy()])
-                    seq_out_str += [conf.inference.fasta_seq_separation]
-                seq_out_str = "".join(seq_out_str)[:-1]
-                out_seqs.append(seq_out_str)
+                    
+                for ix in range(S_stack.shape[0]):   
+                    # extract fasta lines
+                    seq_np = np.array(list(seq))
+                    seq_out_str = []
+                    for mask in protein_dict["mask_c"]:
+                        seq_out_str += list(seq_np[mask.cpu().numpy()])
+                        seq_out_str += [conf.inference.fasta_seq_separation]
+                    seq_out_str = "".join(seq_out_str)[:-1]
+                    out_seqs.append(seq_out_str)
+                            
     
     if design_run:
         return out_seqs
