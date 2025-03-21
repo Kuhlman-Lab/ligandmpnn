@@ -19,7 +19,7 @@ inference:
   save_stats: False
   zero_indexed: 0 #1 - to start output PDB numbering with 0
   force_hetatm: 0 #To force ligand atoms to be written as HETATM to PDB file after packing
-  
+  parse_ptms: 0 #1 - to parse post-translational modifications (PTMs) from the input PDB, 0 - do not parse PTMs
   pack_side_chains: 1 #1 - to run side chain packer, 0 - do not run it
   number_of_packs_per_design: 4 #Number of independent side chain packing samples to return per design
   pack_with_ligand_context: 1 #1-pack side chains using ligand context, 0 - do not use it
