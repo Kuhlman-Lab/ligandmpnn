@@ -5,6 +5,7 @@ import random
 import sys
 import argparse
 import omegaconf
+from omegaconf import OmegaConf
 
 import numpy as np
 import torch
@@ -239,12 +240,26 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
         parse_all_atoms_flag = conf.inference.ligand_mpnn_use_side_chain_context or (
             conf.inference.pack_side_chains and not conf.inference.repack_everything
         )
+        UNDEFINED_VALUE = 3430323896892821
+        if OmegaConf.select(conf, "inference.parse_ptms", default=UNDEFINED_VALUE) == UNDEFINED_VALUE:
+            conf.inference.parse_ptms = 0
+        parse_ptms_flag = False
+        if conf.inference.parse_ptms==1:
+            parse_ptms_flag = True
+
+        print("parse_ptms_flag", parse_ptms_flag)
+        parse_zero_occupancy_flag = False
+        if conf.inference.parse_atoms_with_zero_occupancy:
+            if conf.inference.parse_atoms_with_zero_occupancy==1:
+                parse_zero_occupancy_flag = True
+
         protein_dict, backbone, other_atoms, icodes, _ = parse_PDB(
             pdb,
             device=device,
             chains=conf.inference.parse_these_chains_only,
             parse_all_atoms=parse_all_atoms_flag,
-            parse_atoms_with_zero_occupancy=conf.inference.parse_atoms_with_zero_occupancy,
+            parse_atoms_with_zero_occupancy=parse_zero_occupancy_flag,
+            parse_ptms=parse_ptms_flag
         )
         # make chain_letter + residue_idx + insertion_code mapping to integers
         R_idx_list = list(protein_dict["R_idx"].cpu().numpy())  # residue indices
@@ -294,6 +309,7 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                 ]
             else:
                 remapped_symmetry_residues = [[]]
+                symmetry_residues_list_of_lists = [[]]
 
             # specify linking weights
             if conf.inference.symmetry_weights:
@@ -409,6 +425,7 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
 
         # set other atom bfactors to 0.0
         if other_atoms:
+            print("WARNING: Setting other atom bfactors to 0.0", other_atoms)
             other_bfactors = other_atoms.getBetas()
             other_atoms.setBetas(other_bfactors * 0.0)
 
@@ -815,5 +832,5 @@ if __name__ == "__main__":
         with open(args.json_file, "r") as fh:
             jsondata = json.load(fh)
     conf = omegaconf.OmegaConf.load(args.config_file)
-    print(main(conf, design_run=True, json_data=jsondata, pdb_paths=[args.pdb_path]))
+    print(main(conf, design_run=False, json_data=jsondata, pdb_paths=[args.pdb_path]))
     # print(main(conf, design_run=True, json_data=args.json_file, pdb_paths=args.pdb_path))
