@@ -14,4 +14,4 @@ source ~/.bashrc
 conda activate ligandmpnn
 module load gcc
 module load cuda
-python run_mpnn.py mpnn_basic.yaml
+python /proj/kuhl_lab/LigandMPNN/run_mpnn.py --config_file mpnn_basic.yaml

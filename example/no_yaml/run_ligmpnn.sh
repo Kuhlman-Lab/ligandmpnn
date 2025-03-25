@@ -14,8 +14,9 @@ source ~/.bashrc
 conda activate ligandmpnn
 module load gcc
 module load cuda
-python run.py \
+python /proj/kuhl_lab/LigandMPNN/run.py \
         --seed 111 \
-        --pdb_path "./inputs/1BC8.pdb" \
+        --pdb_path "./1BC8.pdb" \
         --out_folder "./outputs/" \
-        --redesigned_residues "C1 C2 C3 C4 C5 C6 C7 C8 C9 C10"
+        --redesigned_residues "C1 C2 C3 C4 C5 C6 C7 C8 C9 C10" \
+        --checkpoint_ligand_mpnn /proj/kuhl_lab/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt
