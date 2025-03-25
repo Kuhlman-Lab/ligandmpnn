@@ -490,12 +490,6 @@ def main(conf, design_run = False, json_data=None, pdb_paths=None) -> None:
                     [feature_dict["batch_size"], feature_dict["mask"].shape[1]],
                     device=device,
                 )
-                # print("feature_dict")
-                # for feat in feature_dict:
-                #     if type(feature_dict[feat]) == torch.Tensor:
-                #         print(feat, feature_dict[feat].shape)
-                #     else:
-                #         print(feat, feature_dict[feat])
                 output_dict = model.sample(feature_dict)
 
                 # compute confidence scores
@@ -835,4 +829,3 @@ if __name__ == "__main__":
     if args.pdb_path:
         conf.inference.pdb_path = args.pdb_path
     main(conf, design_run=False, json_data=jsondata, pdb_paths=[conf.inference.pdb_path])
-    # print(main(conf, design_run=True, json_data=args.json_file, pdb_paths=args.pdb_path))
