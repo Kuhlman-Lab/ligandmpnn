@@ -832,5 +832,7 @@ if __name__ == "__main__":
         with open(args.json_file, "r") as fh:
             jsondata = json.load(fh)
     conf = omegaconf.OmegaConf.load(args.config_file)
-    print(main(conf, design_run=False, json_data=jsondata, pdb_paths=[args.pdb_path]))
+    if args.pdb_path:
+        conf.inference.pdb_path = args.pdb_path
+    main(conf, design_run=False, json_data=jsondata, pdb_paths=[conf.inference.pdb_path])
     # print(main(conf, design_run=True, json_data=args.json_file, pdb_paths=args.pdb_path))
