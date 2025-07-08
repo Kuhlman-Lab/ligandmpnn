@@ -237,6 +237,12 @@ def main(args, design_run: bool = False) -> None:
                             j1 = restype_str_to_int[amino_acid]
                             omit_AA_per_residue[i1, j1] = 1.0
 
+        # JSON-parsed res info isn't split by default, causing silent errors
+        if isinstance(fixed_residues, str):
+            fixed_residues = fixed_residues.split(" ")
+        if isinstance(redesigned_residues, str):
+            redesigned_residues = redesigned_residues.split(" ")
+
         fixed_positions = torch.tensor(
             [int(item not in fixed_residues) for item in encoded_residues],
             device=device,
