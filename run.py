@@ -1003,6 +1003,19 @@ if __name__ == "__main__":
         action="store_true", 
         help="Use 'inside-out' decoding scheme which decodes residues near ligands first. Off by default."
     )
+    
+    argparser.add_argument(
+        "--shell_radius", 
+        type=float, 
+        default = 10.0,
+        help="Radius for residues to design for inside-out decoding"
+    )
+
+    argparser.add_argument(
+        "--second_shell_decoding", 
+        action="store_true", 
+        help="Use 'second_shell' decoding scheme which decodes 1 shell of residues near selected residues first, then decodes the rest randomly. Off by default."
+    )
 
     args = argparser.parse_args()
     main(args)
