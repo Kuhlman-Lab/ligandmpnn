@@ -177,6 +177,148 @@ class ProteinMPNN(torch.nn.Module):
 
         return h_V, h_E, E_idx
 
+    def add_sidechain_context_to_feature_dict(self, input_features):
+        ''' 
+        Add side-chain atom context to the input features for ligand MPNN.
+        Here side-chain atoms does NOT include CB (index 3)
+        Returns 
+            - Y, updated coordinates # [B, L, atoms, 3]
+            - Y_m, updated masks
+            - Y_t, updated atom types
+        '''
+
+        xyz_37 = input_features["xyz_37"] # holds all 37 atoms coordinates, [L, 37, 3]
+        xyz_37_m = input_features["xyz_37_m"]
+        E_idx_sub = E_idx[:, :, :16]  # [B, L, 15]
+        mask_residues = input_features["chain_mask"]
+        xyz_37_m = xyz_37_m * (1 - mask_residues[:, :, None]) # mask_residues = 1 for residues being designed
+        R_m = gather_nodes(xyz_37_m[:, :, 5:], E_idx_sub)
+
+        X_sidechain = xyz_37[:, :, 5:, :].view(B, L, -1) # slide out 32 sidechain atoms, not including CB in index 3
+        R = gather_nodes(X_sidechain, E_idx_sub).view(
+            B, L, E_idx_sub.shape[2], -1, 3
+        )
+        R_t = self.side_chain_atom_types[None, None, None, :].repeat(
+            B, L, E_idx_sub.shape[2], 1
+        )
+
+        # Side chain atom context
+        R = R.view(B, L, -1, 3)  # coordinates
+        R_m = R_m.view(B, L, -1)  # mask
+        R_t = R_t.view(B, L, -1)  # atom types
+
+        # Ligand atom context
+        Y = torch.cat((R, Y), 2)  # [B, L, atoms, 3]
+        Y_m = torch.cat((R_m, Y_m), 2)  # [B, L, atoms]
+        Y_t = torch.cat((R_t, Y_t), 2)  # [B, L, atoms]
+
+        # compute distances between ligand atoms and sidechain Cb atoms, 
+        Cb_Y_distances = torch.sum((Cb[:, :, None, :] - Y) ** 2, -1)
+        mask_Y = mask[:, :, None] * Y_m
+        Cb_Y_distances_adjusted = Cb_Y_distances * mask_Y + (1.0 - mask_Y) * 10000.0
+        # select top-k (atom_context_num = 16) closest atoms
+        _, E_idx_Y = torch.topk(
+            Cb_Y_distances_adjusted, self.atom_context_num, dim=-1, largest=False
+        )
+
+        Y = torch.gather(Y, 2, E_idx_Y[:, :, :, None].repeat(1, 1, 1, 3))
+        Y_t = torch.gather(Y_t, 2, E_idx_Y)
+        Y_m = torch.gather(Y_m, 2, E_idx_Y)
+    
+def get_fixed_sidechain_context_atoms(self, feature_dict):
+    """
+    Collect side-chain atoms (indices 5..36 of the 37-atom representation)
+    belonging to FIXED residues, to use as extra ligand-like context atoms.
+    Here side-chain atoms includes CB (index 4)
+
+    A residue is "fixed" when chain_mask == 0 (0 = fixed, 1 = to be designed).
+
+    Returns a flat set of atoms across the whole structure:
+        sc_Y   : [B, N_sc, 3]  coordinates
+        sc_Y_t : [B, N_sc]     element (atomic number) types
+        sc_Y_m : [B, N_sc]     presence mask (1 = real atom, 0 = padding/absent)
+    where N_sc = L * 32 (padded; use sc_Y_m to filter to real atoms).
+    """
+    xyz_37 = feature_dict["xyz_37"]        # [B, L, 37, 3], raw from pdb file
+    xyz_37_m = feature_dict["xyz_37_m"]    # [B, L, 37]
+    chain_mask = feature_dict["chain_mask"]  # [B, L]; 0 = fixed, 1 = designed
+    B, L = chain_mask.shape
+    device = xyz_37.device
+
+    # Same 32 side-chain atom element types used in ProteinFeaturesLigand.
+    # (the last 32 atoms of the 37-atom representation)
+    side_chain_atom_types = torch.tensor(
+        [6,6, 6, 6, 8, 8, 16, 6, 6, 6, 7, 7, 8, 8, 16, 6, 6,
+        6, 6, 7, 7, 7, 8, 8, 6, 7, 7, 8, 6, 6, 6, 7, 8],
+        device=device,
+    )  # [32]
+
+    # Keep only side-chain atoms (4:) of fixed residues, including CB
+    # Atom indices 0–3 are backbone (N, CA, C, O); indices  4–36 are the 32 sc atoms (CB,...)
+    #   xyz_37_m is 1 where an atom exists; multiply by (1 - chain_mask)
+    #   so designed residues (chain_mask == 1) are zeroed out.
+
+    # atom_order here is N,CA,C,CB,O,CG,... so CB=3, O=4, sidechain=5:
+    sc_indices = torch.tensor([3] + list(range(5, 37)), device=xyz_37.device)  # 33 entries
+    # compute the mask, coordinates, and types of the side-chain atoms of fixed residues
+    sc_m = xyz_37_m[:, :, sc_indices] * (1 - chain_mask[:, :, None])  # [B, L, 33]
+    sc_xyz = xyz_37[:, :, sc_indices, :]                              # [B, L, 33, 3]
+    sc_t = side_chain_atom_types[None, None, :].repeat(B, L, 1)  # [B, L, 33]
+
+    print("side chain atom information")
+    # Boolean mask of real fixed-residue side-chain atoms
+    valid = sc_m.bool()  # [B, L, 33]
+    num_fixed_sc = int(valid.sum().item())
+    print(f"number of fixed side-chain atoms: {num_fixed_sc}")
+
+    # Select only the valid atoms -> flat lists
+    atom_types = sc_t[valid]        # [N_valid]
+    atom_coords = sc_xyz[valid]     # [N_valid, 3]
+
+    # for t, xyz in zip(atom_types.tolist(), atom_coords.tolist()):
+    #    print(f"  Z={t}  xyz={xyz}")
+
+    # Flatten (L, 32) -> N_sc so these can be concatenated onto the ligand atoms.
+    sc_Y = sc_xyz.reshape(B, L * 33, 3)   # [B, N_sc, 3]
+    sc_Y_m = sc_m.reshape(B, L * 33)      # [B, N_sc]
+    sc_Y_t = sc_t.reshape(B, L * 33)      # [B, N_sc]
+
+    return sc_Y, sc_Y_t, sc_Y_m
+
+def _min_cb_to_context_dist(self, feature_dict, include_fixed_sidechains: bool):
+        """
+        Min distance from each residue's Cb to any context atom.
+        If include_fixed_sidechains, also treats fixed residues' side-chain
+        atoms as context atoms.
+        Returns [B, L]. B = batch size, L = number of residues.
+        """
+        Cb_atoms = feature_dict["X"][:, :, -1, :]          # [B, L, 3]
+
+        # Ligand context atoms (per-residue set): 
+        lig = feature_dict["Y"] # [B, L, num_context_atoms, 3]
+        print(f"lig shape: {lig.shape}")  # [B, L, num_context_atoms, 3]
+        d_lig = (Cb_atoms[:, :, None, :] - lig).square().sum(-1).sqrt()  # [B, L, A]
+        d_lig = torch.amin(d_lig, dim=-1)                                # [B, L]
+
+        if not include_fixed_sidechains:
+            return d_lig
+
+        # Fixed side-chain atoms (flat global set): [B, N_sc, 3]
+        sc_Y, _, sc_Y_m = self.get_fixed_sidechain_context_atoms(feature_dict)
+        print(f"sc_Y shape: {sc_Y.shape}, sc_Y_m shape: {sc_Y_m.shape}")  # [B, N_sc, 3], [B, N_sc]
+        # Extract and print the non-zero triplets
+        # nonzero_mask = (sc_Y != 0).any(dim=-1)
+        # non_zero_triplets = sc_Y[nonzero_mask]
+        # print(non_zero_triplets)
+
+        # Distance from every Cb to every fixed side-chain atom.
+        d_sc = (Cb_atoms[:, :, None, :] - sc_Y[:, None, :, :]).square().sum(-1).sqrt()  # [B, L, N_sc]
+        # Mask absent/padding atoms so they can't win the min.
+        d_sc = d_sc * sc_Y_m[:, None, :] + (1.0 - sc_Y_m[:, None, :]) * 1e6
+        d_sc = torch.amin(d_sc, dim=-1)  # [B, L]
+
+        return torch.minimum(d_lig, d_sc)
+    
     def sample(self, feature_dict, inside_out_decoding: bool = False):
         # xyz_37 = feature_dict["xyz_37"] #[B,L,37,3] - xyz coordinates for all atoms if needed
         # xyz_37_m = feature_dict["xyz_37_m"] #[B,L,37] - mask for all coords
@@ -219,15 +361,25 @@ class ProteinMPNN(torch.nn.Module):
 
         # Decode semi-randomly starting from nearest residues to context atoms
         if inside_out_decoding:
+            # NEW context atoms includes ligand atoms and side-chain atoms of fixed residues
+            # includes atoms of fixed residues when ligand_mpnn_use_side_chain_context is on
+           
+            # OLD context atoms only includes ligand atoms
             # Calculate min dist from each Cb to context atom(s)
-            context_atoms = feature_dict["Y"] # [B, L, num_context_atoms, 3]
+            #  context_atoms = feature_dict["Y"] # [B, L, num_context_atoms, 3]
             Cb_atoms = feature_dict["X"][:, :, -1, :]
-            Cb_to_cxt_dist = Cb_atoms[:, :, None, :] - context_atoms # [B, L, num_context_atoms, 3]
-            Cb_to_cxt_dist = Cb_to_cxt_dist.square().sum(-1).sqrt() # [B, L, num_context_atoms]
-            Cb_to_cxt_dist = torch.amin(Cb_to_cxt_dist, dim=-1) # [B, L]
- 
-            # Mask out fixed/nonexistent residues
-            Cb_to_cxt_dist *= chain_mask
+            # Cb_to_cxt_dist = Cb_atoms[:, :, None, :] - context_atoms # [B, L, num_context_atoms, 3]
+            # Cb_to_cxt_dist = Cb_to_cxt_dist.square().sum(-1).sqrt() # [B, L, num_context_atoms]
+            # Cb_to_cxt_dist = torch.amin(Cb_to_cxt_dist, dim=-1) # [B, L]
+
+            
+            use_sc = bool(getattr(self.features, "use_side_chains", False))
+            print(f"using side-chain context atoms: {use_sc}")
+            Cb_to_cxt_dist = self._min_cb_to_context_dist(feature_dict, include_fixed_sidechains=use_sc)   # [B, L] 
+            print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")  
+            # Mask out fixed/nonexistent residues                  
+            Cb_to_cxt_dist *= chain_mask   # keep your existing masking of fixed/nonexistent residues
+            print(f"Cb_to_cxt_dist after mask: {Cb_to_cxt_dist}")
 
             quantiles = torch.tensor([0.2, 0.4, 0.6, 0.8, 1.0]).to(S_true.device)
             quantiles = torch.quantile(Cb_to_cxt_dist, quantiles, dim=-1)
@@ -249,7 +401,64 @@ class ProteinMPNN(torch.nn.Module):
             # Collect all quantiles
             randn_q = torch.cat(randn_q).expand(randn.shape[0], -1)
             decoding_order = randn_q
+            
+        elif second_shell_decoding:
+            print("using second_shell decoding order")
 
+            # OLD WAY Calculate min dist from each Cb to context atom(s) - doesn't includes fixed side-chain
+            # context_atoms = feature_dict["Y"] # [B, L, num_context_atoms, 3]
+            Cb_atoms = feature_dict["X"][:, :, -1, :] # these are virtual Cb atoms
+            # Cb_to_cxt_dist = Cb_atoms[:, :, None, :] - context_atoms # [B, L, num_context_atoms, 3]
+            # Cb_to_cxt_dist = Cb_to_cxt_dist.square().sum(-1).sqrt() # [B, L, num_context_atoms]
+
+            # Push masked-out (nonexistent) atom slots far away so they're never picked as "nearest"
+            # Cb_to_cxt_dist = Cb_to_cxt_dist * context_mask + (1.0 - context_mask) * 10000.0
+            # find min distance to context atoms for each residue
+            # Cb_to_cxt_dist = torch.amin(Cb_to_cxt_dist, dim=-1) # [B, L]
+
+            use_sc = bool(getattr(self.features, "use_side_chains", False))
+            print(f"using side-chain context atoms: {use_sc}")
+            # adjust shell radius for sidechain use
+            if use_sc:
+                shell_radius = 6.0
+                
+            # NEW better way of calculating min dist from each Cb to context atom(s)
+            Cb_to_cxt_dist = self._min_cb_to_context_dist(feature_dict, include_fixed_sidechains=use_sc)   # [B, L]
+            print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")
+ 
+            # Mask out fixed/nonexistent residues
+            Cb_to_cxt_dist *= chain_mask
+            print(f"Cb_to_cxt_dist after chain mask: {Cb_to_cxt_dist}")
+
+            # Add fixed/nonexistent residues first
+            shell_res_order = []    
+            fixed_res = torch.where(Cb_to_cxt_dist.squeeze(0) == 0)[0]
+            print(f"fixed residues are {fixed_res}")
+            shell_res_order.append(fixed_res)
+            # print(f"shell res order 1:{ shell_res_order}")
+
+            # find and add residues within cutoff radius to context atoms
+            print(f"Computing 2nd shell residues using radius: {shell_radius}")
+            second_shell_res = (Cb_to_cxt_dist <= shell_radius) * (Cb_to_cxt_dist > 0) # [1, L]
+            second_shell_res = torch.where(second_shell_res.squeeze(0))[0] # [X]
+            print(f"shell residues are {second_shell_res}")
+            second_shell_res = second_shell_res[torch.randperm(second_shell_res.size(0))]
+            shell_res_order.append(second_shell_res)
+            # print(f"shell res order 2:{ shell_res_order}")
+
+            # find and add all other residues (farther than cutoff radius)
+            other_res = (Cb_to_cxt_dist > shell_radius)
+            print(f"other residues are {other_res}")
+            other_res = torch.where(other_res.squeeze(0))[0]
+            other_res = other_res[torch.randperm(other_res.size(0))]
+            shell_res_order.append(other_res)
+            # print(f"shell res order 3:{ shell_res_order}")
+
+            # convert to pytorch tensor
+            shell_res_order = torch.cat(shell_res_order).expand(randn.shape[0], -1)
+            decoding_order = shell_res_order
+
+            print(f"the decoding order is {decoding_order}")
         else:
             decoding_order = torch.argsort(
                 (chain_mask + 0.0001) * (torch.abs(randn))

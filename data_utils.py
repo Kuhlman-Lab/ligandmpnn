@@ -788,7 +788,7 @@ def parse_PDB(
     protein_atoms = atoms.select("protein")
     backbone = protein_atoms.select("backbone")
     other_atoms = atoms.select("not protein and not water")
-    if parse_ptms is True and other_atoms is None:
+    if parse_ptms and other_atoms is None:
         other_atoms = atoms.select("hetatm and not water")
     water_atoms = atoms.select("water")
 
