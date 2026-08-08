@@ -376,10 +376,10 @@ class ProteinMPNN(torch.nn.Module):
             use_sc = bool(getattr(self.features, "use_side_chains", False))
             print(f"using side-chain context atoms: {use_sc}")
             Cb_to_cxt_dist = self._min_cb_to_context_dist(feature_dict, include_fixed_sidechains=use_sc)   # [B, L] 
-            print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")  
+            # print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")  
             # Mask out fixed/nonexistent residues                  
             Cb_to_cxt_dist *= chain_mask   # keep your existing masking of fixed/nonexistent residues
-            print(f"Cb_to_cxt_dist after mask: {Cb_to_cxt_dist}")
+            # print(f"Cb_to_cxt_dist after mask: {Cb_to_cxt_dist}")
 
             quantiles = torch.tensor([0.2, 0.4, 0.6, 0.8, 1.0]).to(S_true.device)
             quantiles = torch.quantile(Cb_to_cxt_dist, quantiles, dim=-1)
