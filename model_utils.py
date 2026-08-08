@@ -713,7 +713,7 @@ def sample(self, feature_dict, inside_out_decoding: bool = False):
             }
         return output_dict
 
-    def single_aa_score(self, feature_dict, use_sequence: bool):
+def single_aa_score(self, feature_dict, use_sequence: bool):
         """
         feature_dict - input features
         use_sequence - False using backbone info only
@@ -802,7 +802,7 @@ def sample(self, feature_dict, inside_out_decoding: bool = False):
         return output_dict
 
 
-    def score(self, feature_dict, use_sequence: bool):
+def score(self, feature_dict, use_sequence: bool):
         B_decoder = feature_dict["batch_size"]
         S_true = feature_dict[
             "S"
