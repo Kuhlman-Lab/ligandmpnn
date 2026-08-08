@@ -424,11 +424,11 @@ class ProteinMPNN(torch.nn.Module):
                 
             # NEW better way of calculating min dist from each Cb to context atom(s)
             Cb_to_cxt_dist = self._min_cb_to_context_dist(feature_dict, include_fixed_sidechains=use_sc)   # [B, L]
-            print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")
+            # print(f"Cb_to_cxt_dist: {Cb_to_cxt_dist}")
  
             # Mask out fixed/nonexistent residues
             Cb_to_cxt_dist *= chain_mask
-            print(f"Cb_to_cxt_dist after chain mask: {Cb_to_cxt_dist}")
+            # print(f"Cb_to_cxt_dist after chain mask: {Cb_to_cxt_dist}")
 
             # Add fixed/nonexistent residues first
             shell_res_order = []    
