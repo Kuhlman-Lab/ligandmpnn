@@ -319,7 +319,7 @@ def _min_cb_to_context_dist(self, feature_dict, include_fixed_sidechains: bool):
 
         return torch.minimum(d_lig, d_sc)
     
-    def sample(self, feature_dict, inside_out_decoding: bool = False):
+def sample(self, feature_dict, inside_out_decoding: bool = False):
         # xyz_37 = feature_dict["xyz_37"] #[B,L,37,3] - xyz coordinates for all atoms if needed
         # xyz_37_m = feature_dict["xyz_37_m"] #[B,L,37] - mask for all coords
         # Y = feature_dict["Y"] #[B,L,num_context_atoms,3] - for ligandMPNN coords
