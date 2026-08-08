@@ -225,65 +225,65 @@ class ProteinMPNN(torch.nn.Module):
         Y_t = torch.gather(Y_t, 2, E_idx_Y)
         Y_m = torch.gather(Y_m, 2, E_idx_Y)
     
-def get_fixed_sidechain_context_atoms(self, feature_dict):
-    """
-    Collect side-chain atoms (indices 5..36 of the 37-atom representation)
-    belonging to FIXED residues, to use as extra ligand-like context atoms.
-    Here side-chain atoms includes CB (index 4)
-
-    A residue is "fixed" when chain_mask == 0 (0 = fixed, 1 = to be designed).
-
-    Returns a flat set of atoms across the whole structure:
-        sc_Y   : [B, N_sc, 3]  coordinates
-        sc_Y_t : [B, N_sc]     element (atomic number) types
-        sc_Y_m : [B, N_sc]     presence mask (1 = real atom, 0 = padding/absent)
-    where N_sc = L * 32 (padded; use sc_Y_m to filter to real atoms).
-    """
-    xyz_37 = feature_dict["xyz_37"]        # [B, L, 37, 3], raw from pdb file
-    xyz_37_m = feature_dict["xyz_37_m"]    # [B, L, 37]
-    chain_mask = feature_dict["chain_mask"]  # [B, L]; 0 = fixed, 1 = designed
-    B, L = chain_mask.shape
-    device = xyz_37.device
-
-    # Same 32 side-chain atom element types used in ProteinFeaturesLigand.
-    # (the last 32 atoms of the 37-atom representation)
-    side_chain_atom_types = torch.tensor(
-        [6,6, 6, 6, 8, 8, 16, 6, 6, 6, 7, 7, 8, 8, 16, 6, 6,
-        6, 6, 7, 7, 7, 8, 8, 6, 7, 7, 8, 6, 6, 6, 7, 8],
-        device=device,
-    )  # [32]
-
-    # Keep only side-chain atoms (4:) of fixed residues, including CB
-    # Atom indices 0–3 are backbone (N, CA, C, O); indices  4–36 are the 32 sc atoms (CB,...)
-    #   xyz_37_m is 1 where an atom exists; multiply by (1 - chain_mask)
-    #   so designed residues (chain_mask == 1) are zeroed out.
-
-    # atom_order here is N,CA,C,CB,O,CG,... so CB=3, O=4, sidechain=5:
-    sc_indices = torch.tensor([3] + list(range(5, 37)), device=xyz_37.device)  # 33 entries
-    # compute the mask, coordinates, and types of the side-chain atoms of fixed residues
-    sc_m = xyz_37_m[:, :, sc_indices] * (1 - chain_mask[:, :, None])  # [B, L, 33]
-    sc_xyz = xyz_37[:, :, sc_indices, :]                              # [B, L, 33, 3]
-    sc_t = side_chain_atom_types[None, None, :].repeat(B, L, 1)  # [B, L, 33]
-
-    print("side chain atom information")
-    # Boolean mask of real fixed-residue side-chain atoms
-    valid = sc_m.bool()  # [B, L, 33]
-    num_fixed_sc = int(valid.sum().item())
-    print(f"number of fixed side-chain atoms: {num_fixed_sc}")
-
-    # Select only the valid atoms -> flat lists
-    atom_types = sc_t[valid]        # [N_valid]
-    atom_coords = sc_xyz[valid]     # [N_valid, 3]
-
-    # for t, xyz in zip(atom_types.tolist(), atom_coords.tolist()):
-    #    print(f"  Z={t}  xyz={xyz}")
-
-    # Flatten (L, 32) -> N_sc so these can be concatenated onto the ligand atoms.
-    sc_Y = sc_xyz.reshape(B, L * 33, 3)   # [B, N_sc, 3]
-    sc_Y_m = sc_m.reshape(B, L * 33)      # [B, N_sc]
-    sc_Y_t = sc_t.reshape(B, L * 33)      # [B, N_sc]
-
-    return sc_Y, sc_Y_t, sc_Y_m
+    def get_fixed_sidechain_context_atoms(self, feature_dict):
+        """
+        Collect side-chain atoms (indices 5..36 of the 37-atom representation)
+        belonging to FIXED residues, to use as extra ligand-like context atoms.
+        Here side-chain atoms includes CB (index 4)
+    
+        A residue is "fixed" when chain_mask == 0 (0 = fixed, 1 = to be designed).
+    
+        Returns a flat set of atoms across the whole structure:
+            sc_Y   : [B, N_sc, 3]  coordinates
+            sc_Y_t : [B, N_sc]     element (atomic number) types
+            sc_Y_m : [B, N_sc]     presence mask (1 = real atom, 0 = padding/absent)
+        where N_sc = L * 32 (padded; use sc_Y_m to filter to real atoms).
+        """
+        xyz_37 = feature_dict["xyz_37"]        # [B, L, 37, 3], raw from pdb file
+        xyz_37_m = feature_dict["xyz_37_m"]    # [B, L, 37]
+        chain_mask = feature_dict["chain_mask"]  # [B, L]; 0 = fixed, 1 = designed
+        B, L = chain_mask.shape
+        device = xyz_37.device
+    
+        # Same 32 side-chain atom element types used in ProteinFeaturesLigand.
+        # (the last 32 atoms of the 37-atom representation)
+        side_chain_atom_types = torch.tensor(
+            [6,6, 6, 6, 8, 8, 16, 6, 6, 6, 7, 7, 8, 8, 16, 6, 6,
+            6, 6, 7, 7, 7, 8, 8, 6, 7, 7, 8, 6, 6, 6, 7, 8],
+            device=device,
+        )  # [32]
+    
+        # Keep only side-chain atoms (4:) of fixed residues, including CB
+        # Atom indices 0–3 are backbone (N, CA, C, O); indices  4–36 are the 32 sc atoms (CB,...)
+        #   xyz_37_m is 1 where an atom exists; multiply by (1 - chain_mask)
+        #   so designed residues (chain_mask == 1) are zeroed out.
+    
+        # atom_order here is N,CA,C,CB,O,CG,... so CB=3, O=4, sidechain=5:
+        sc_indices = torch.tensor([3] + list(range(5, 37)), device=xyz_37.device)  # 33 entries
+        # compute the mask, coordinates, and types of the side-chain atoms of fixed residues
+        sc_m = xyz_37_m[:, :, sc_indices] * (1 - chain_mask[:, :, None])  # [B, L, 33]
+        sc_xyz = xyz_37[:, :, sc_indices, :]                              # [B, L, 33, 3]
+        sc_t = side_chain_atom_types[None, None, :].repeat(B, L, 1)  # [B, L, 33]
+    
+        print("side chain atom information")
+        # Boolean mask of real fixed-residue side-chain atoms
+        valid = sc_m.bool()  # [B, L, 33]
+        num_fixed_sc = int(valid.sum().item())
+        print(f"number of fixed side-chain atoms: {num_fixed_sc}")
+    
+        # Select only the valid atoms -> flat lists
+        atom_types = sc_t[valid]        # [N_valid]
+        atom_coords = sc_xyz[valid]     # [N_valid, 3]
+    
+        # for t, xyz in zip(atom_types.tolist(), atom_coords.tolist()):
+        #    print(f"  Z={t}  xyz={xyz}")
+    
+        # Flatten (L, 32) -> N_sc so these can be concatenated onto the ligand atoms.
+        sc_Y = sc_xyz.reshape(B, L * 33, 3)   # [B, N_sc, 3]
+        sc_Y_m = sc_m.reshape(B, L * 33)      # [B, N_sc]
+        sc_Y_t = sc_t.reshape(B, L * 33)      # [B, N_sc]
+    
+        return sc_Y, sc_Y_t, sc_Y_m
 
     def _min_cb_to_context_dist(self, feature_dict, include_fixed_sidechains: bool):
         """
