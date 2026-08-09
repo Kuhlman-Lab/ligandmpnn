@@ -319,7 +319,7 @@ class ProteinMPNN(torch.nn.Module):
 
         return torch.minimum(d_lig, d_sc)
     
-    def sample(self, feature_dict, inside_out_decoding: bool = False):
+    def sample(self, feature_dict, inside_out_decoding: bool = False, second_shell_decoding: bool = False, shell_radius: float = 10.0):
         # xyz_37 = feature_dict["xyz_37"] #[B,L,37,3] - xyz coordinates for all atoms if needed
         # xyz_37_m = feature_dict["xyz_37_m"] #[B,L,37] - mask for all coords
         # Y = feature_dict["Y"] #[B,L,num_context_atoms,3] - for ligandMPNN coords
